@@ -145,14 +145,11 @@ function isWalkableForGhost(
   maze: number[][],
   col: number,
   row: number,
-  mode: GhostMode,
+  _mode: GhostMode,
 ): boolean {
   if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
   const t = maze[row][col];
   if (t === 1) return false;
-  // Ghosts in non-leaving/non-eaten mode can't enter the ghost house interior (2) or door (4)
-  if ((t === 4 || t === 2) && mode !== "leaving" && mode !== "eaten")
-    return false;
   return true;
 }
 
@@ -163,7 +160,7 @@ function isWalkableForPacman(
 ): boolean {
   if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
   const t = maze[row][col];
-  return t !== 1 && t !== 2 && t !== 4; // can't enter ghost house (2) or door (4); 5=eaten dot is walkable
+  return t !== 1; // only walls block pac-man; ghost house (2), door (4), and eaten dots (5) are all walkable
 }
 
 function dirToVec(dir: Direction): { dx: number; dy: number } {
@@ -386,12 +383,6 @@ function drawMaze(
         ctx.fillStyle = wallHighlight;
         ctx.fillRect(x + 1, y + 1, TILE - 3, 2);
         ctx.fillRect(x + 1, y + 1, 2, TILE - 3);
-      } else if (t === 4) {
-        // Ghost door
-        const x = c * TILE;
-        const y = r * TILE;
-        ctx.fillStyle = "#FFD580";
-        ctx.fillRect(x, y + TILE * 0.3, TILE, TILE * 0.4);
       }
     }
   }
@@ -881,17 +872,11 @@ function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
   // ── Leaving mode: navigate out of the ghost house step by step ─────────────
   // Exit path:
   //   Phase 1: center on col 10 (x = 10*TILE+TILE/2)
-  //   Phase 2: move up through door (row 9) to row 8 center (y = 8*TILE+TILE/2)
-  //   Phase 3: move left along row 8 to col 8 (x = 8*TILE+TILE/2)
-  //            [col 5 in row 8 is a wall so we can only go as far left as col 6;
-  //             col 8 is safe and gives a clear upward exit]
-  //   Phase 4: move up col 8 through row 7 (type 2, house) to row 6 (open maze)
+  //   Phase 2: move up through door (rows 9->8->7) to row 6 (open maze)
   //   Done: switch to scatter mode
   if (ghost.mode === "leaving") {
     const centerX = 10 * TILE + TILE / 2; // col 10 – aligns with door
-    const row8Y = 8 * TILE + TILE / 2; // row 8 (house interior, passable for leaving)
-    const corridorX = 8 * TILE + TILE / 2; // col 8 – clear upward exit to open maze
-    const openY = 6 * TILE + TILE / 2; // row 6 (open maze corridor)
+    const openY = 6 * TILE + TILE / 2; // row 6 (open maze corridor above door)
 
     const snap = (v: number, target: number) =>
       Math.abs(v - target) < pixelSpeed ? target : v;
@@ -902,32 +887,17 @@ function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
       ghost.x = snap(ghost.x + dx * pixelSpeed, centerX);
       ghost.dir = dx > 0 ? "right" : "left";
     }
-    // Phase 2: move up through door (row 9) into row 8
-    else if (ghost.y > row8Y + 2) {
+    // Phase 2: move straight up through door to open maze at row 6
+    else if (ghost.y > openY + 2) {
       ghost.x = centerX;
       ghost.col = 10;
-      ghost.y = snap(ghost.y - pixelSpeed, row8Y);
-      ghost.dir = "up";
-    }
-    // Phase 3: move left along row 8 to col 8
-    else if (Math.abs(ghost.x - corridorX) > 2) {
-      ghost.y = row8Y;
-      ghost.row = 8;
-      const dx = ghost.x < corridorX ? 1 : -1;
-      ghost.x = snap(ghost.x + dx * pixelSpeed, corridorX);
-      ghost.dir = dx > 0 ? "right" : "left";
-    }
-    // Phase 4: move up col 8 through row 7 (house interior) to row 6 (open maze)
-    else if (ghost.y > openY + 2) {
-      ghost.x = corridorX;
-      ghost.col = 8;
       ghost.y = snap(ghost.y - pixelSpeed, openY);
       ghost.dir = "up";
     } else {
-      // Done -- ghost is now in the open maze at col 8, row 6
-      ghost.x = corridorX;
+      // Done -- ghost is now in the open maze at col 10, row 6
+      ghost.x = centerX;
       ghost.y = openY;
-      ghost.col = 8;
+      ghost.col = 10;
       ghost.row = 6;
       ghost.dir = "left";
       ghost.mode = "scatter";
@@ -938,14 +908,15 @@ function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
     return;
   }
 
-  // Check if eaten ghost reached house
+  // Check if eaten ghost reached house entrance (row 9, col 10 = door area)
   if (ghost.mode === "eaten") {
-    const houseX = 10 * TILE + TILE / 2;
-    const houseY = 10 * TILE + TILE / 2;
-    const distToHouse = Math.abs(ghost.x - houseX) + Math.abs(ghost.y - houseY);
+    const houseEnterX = 10 * TILE + TILE / 2;
+    const houseEnterY = 10 * TILE + TILE / 2;
+    const distToHouse =
+      Math.abs(ghost.x - houseEnterX) + Math.abs(ghost.y - houseEnterY);
     if (distToHouse < pixelSpeed + 4) {
-      ghost.x = houseX;
-      ghost.y = houseY;
+      ghost.x = houseEnterX;
+      ghost.y = houseEnterY;
       ghost.col = 10;
       ghost.row = 10;
       ghost.mode = "leaving";
@@ -960,7 +931,7 @@ function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
 
   if (ghost.mode === "eaten") {
     targetCol = 10;
-    targetRow = 9;
+    targetRow = 10; // aim for center of ghost house
   } else if (ghost.mode === "frightened") {
     // Random flee: pick a random corner each time (evaluated at tile center)
     const corners = [
