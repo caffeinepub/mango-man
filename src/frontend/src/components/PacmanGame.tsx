@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useIsMobile } from "../hooks/use-mobile";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TILE = 20;
@@ -722,6 +724,11 @@ function drawStartScreen(ctx: CanvasRenderingContext2D, timer: number) {
   ctx.fillStyle = C.textLight;
   ctx.font = `500 12px 'Cabinet Grotesk', system-ui, sans-serif`;
   ctx.fillText("Arrow Keys or WASD to move", CANVAS_W / 2, CANVAS_H / 2 + 75);
+  ctx.fillText(
+    "Swipe or tap buttons on mobile",
+    CANVAS_W / 2,
+    CANVAS_H / 2 + 92,
+  );
 
   // Ghost row
   const ghostColors = [C.ghost1, C.ghost2, C.ghost3, C.ghost4];
@@ -1010,6 +1017,9 @@ export default function PacmanGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameRef>(initGame());
   const timerRef = useRef(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const isMobile = useIsMobile();
 
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
@@ -1082,6 +1092,55 @@ export default function PacmanGame() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
+
+  // ── Touch controls ─────────────────────────────────────────────────────────
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      const g = gameRef.current;
+      if (g.gameState === "start" || g.gameState === "gameover") {
+        startGame();
+      }
+    },
+    [startGame],
+  );
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      if (!touchStartRef.current) return;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchStartRef.current.x;
+      const dy = touch.clientY - touchStartRef.current.y;
+      touchStartRef.current = null;
+
+      const MIN_SWIPE = 20;
+      if (Math.abs(dx) < MIN_SWIPE && Math.abs(dy) < MIN_SWIPE) return;
+
+      const g = gameRef.current;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        g.pacNextDir = dx > 0 ? "right" : "left";
+      } else {
+        g.pacNextDir = dy > 0 ? "down" : "up";
+      }
+    },
+    [],
+  );
+
+  // D-pad button press handler
+  const handleDpadPress = useCallback(
+    (dir: Direction) => {
+      const g = gameRef.current;
+      if (g.gameState === "start" || g.gameState === "gameover") {
+        startGame();
+        return;
+      }
+      g.pacNextDir = dir;
+    },
+    [startGame],
+  );
 
   // ── Game loop ──────────────────────────────────────────────────────────────
   const gameLoop = useCallback(
@@ -1491,8 +1550,10 @@ export default function PacmanGame() {
               onKeyDown={(e) => {
                 if (e.key === " " || e.key === "Enter") handleCanvasClick();
               }}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
               data-ocid="pacman.canvas_target"
-              className="block cursor-pointer focus:outline-none"
+              className="block cursor-pointer focus:outline-none touch-none"
               style={{
                 maxWidth: "100%",
                 maxHeight: "calc(100vh - 200px)",
@@ -1514,6 +1575,77 @@ export default function PacmanGame() {
           >
             {gameState === "gameover" ? "Play Again" : "Start Game"}
           </button>
+        </div>
+      )}
+
+      {/* Mobile D-pad controls */}
+      {isMobile && (
+        <div className="pb-4 px-4 w-full max-w-xs flex flex-col items-center gap-1 select-none">
+          {/* Up */}
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                handleDpadPress("up");
+              }}
+              onClick={() => handleDpadPress("up")}
+              data-ocid="pacman.dpad_up_button"
+              className="w-14 h-14 flex items-center justify-center bg-mango-400 hover:bg-mango-500 active:bg-mango-600 active:scale-95 text-white rounded-xl shadow-md transition-all duration-75 text-2xl font-black border-2 border-mango-500"
+              aria-label="Move up"
+            >
+              ▲
+            </button>
+          </div>
+          {/* Left / Down / Right row */}
+          <div className="flex justify-center gap-1">
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                handleDpadPress("left");
+              }}
+              onClick={() => handleDpadPress("left")}
+              data-ocid="pacman.dpad_left_button"
+              className="w-14 h-14 flex items-center justify-center bg-mango-400 hover:bg-mango-500 active:bg-mango-600 active:scale-95 text-white rounded-xl shadow-md transition-all duration-75 text-2xl font-black border-2 border-mango-500"
+              aria-label="Move left"
+            >
+              ◀
+            </button>
+            {/* Center dead zone */}
+            <div className="w-14 h-14 rounded-xl bg-mango-100 border-2 border-mango-200 flex items-center justify-center">
+              <div className="w-4 h-4 rounded-full bg-mango-300" />
+            </div>
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                handleDpadPress("right");
+              }}
+              onClick={() => handleDpadPress("right")}
+              data-ocid="pacman.dpad_right_button"
+              className="w-14 h-14 flex items-center justify-center bg-mango-400 hover:bg-mango-500 active:bg-mango-600 active:scale-95 text-white rounded-xl shadow-md transition-all duration-75 text-2xl font-black border-2 border-mango-500"
+              aria-label="Move right"
+            >
+              ▶
+            </button>
+          </div>
+          {/* Down */}
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                handleDpadPress("down");
+              }}
+              onClick={() => handleDpadPress("down")}
+              data-ocid="pacman.dpad_down_button"
+              className="w-14 h-14 flex items-center justify-center bg-mango-400 hover:bg-mango-500 active:bg-mango-600 active:scale-95 text-white rounded-xl shadow-md transition-all duration-75 text-2xl font-black border-2 border-mango-500"
+              aria-label="Move down"
+            >
+              ▼
+            </button>
+          </div>
         </div>
       )}
 
