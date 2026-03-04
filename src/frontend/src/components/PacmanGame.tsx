@@ -11,9 +11,9 @@ const CANVAS_H = ROWS * TILE;
 
 // Speed in tiles/second
 const PACMAN_SPEED = 7.5;
-const GHOST_SPEED = 6;
-const FRIGHTENED_SPEED = 3.5;
-const GHOST_SPEED_LEAVING = 4;
+const GHOST_SPEED = 3.5;
+const FRIGHTENED_SPEED = 2;
+const GHOST_SPEED_LEAVING = 2.5;
 
 // Timing
 const FRIGHTENED_DURATION = 8000; // ms
