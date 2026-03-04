@@ -17,6 +17,8 @@ const GHOST_SPEED_LEAVING = 4;
 const FRIGHTENED_DURATION = 8000; // ms
 const GHOST_EXIT_DELAY = 2000; // ms between ghost exits
 const BLINK_START = 2000; // ms before frightened ends, start blinking
+const SCATTER_DURATION = 7000; // ms in scatter before switching to chase
+const CHASE_DURATION = 20000; // ms in chase before switching back
 
 // ─── Colors (Mango Mustard) ──────────────────────────────────────────────────
 const C = {
@@ -121,6 +123,7 @@ interface GameRef {
   frightenedActive: boolean;
   frightenedTimer: number;
   frightenedEatCount: number;
+  scatterTimer: number; // counts up; drives scatter/chase cycle
   lastTime: number;
   frameReq: number;
   levelCompleteTimer: number;
@@ -285,6 +288,7 @@ function initGame(): GameRef {
     frightenedActive: false,
     frightenedTimer: 0,
     frightenedEatCount: 0,
+    scatterTimer: 0,
     lastTime: 0,
     frameReq: 0,
     levelCompleteTimer: 0,
@@ -795,7 +799,7 @@ function drawLevelComplete(
 
 // ─── Ghost Update (module-level for stable useCallback deps) ──────────────────
 function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
-  const { maze, pacCol, pacRow, frightenedActive } = g;
+  const { maze, pacCol, pacRow } = g;
 
   // Update exit delay
   if (ghost.mode === "scatter" && ghost.exitDelay > 0) {
@@ -925,11 +929,6 @@ function updateGhost(ghost: Ghost, dt: number, g: GameRef) {
     ghost.col = 0;
     ghost.x = TILE / 2;
   }
-
-  // Switch to chase mode
-  if (ghost.mode === "scatter" && !frightenedActive) {
-    ghost.mode = "chase";
-  }
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -1056,6 +1055,7 @@ export default function PacmanGame() {
           g.ghosts = initGhosts();
           g.frightenedActive = false;
           g.frightenedTimer = 0;
+          g.scatterTimer = 0;
           g.levelCompleteTimer = 0;
           g.gameState = "playing";
           setLevel(g.level);
@@ -1095,6 +1095,7 @@ export default function PacmanGame() {
             g.ghosts = initGhosts();
             g.frightenedActive = false;
             g.frightenedTimer = 0;
+            g.scatterTimer = 0;
             g.dyingTimer = 0;
             g.gameState = "playing";
             setGameState("playing");
@@ -1114,6 +1115,21 @@ export default function PacmanGame() {
           g.frightenedEatCount = 0;
           for (const ghost of g.ghosts) {
             if (ghost.mode === "frightened") ghost.mode = "chase";
+          }
+        }
+      }
+
+      // Scatter / chase cycle (only when not frightened)
+      if (!g.frightenedActive) {
+        g.scatterTimer += dt;
+        const cyclePos = g.scatterTimer % (SCATTER_DURATION + CHASE_DURATION);
+        const shouldChase = cyclePos >= SCATTER_DURATION;
+        for (const ghost of g.ghosts) {
+          if (ghost.mode === "scatter" && shouldChase) {
+            ghost.mode = "chase";
+          } else if (ghost.mode === "chase" && !shouldChase) {
+            ghost.mode = "scatter";
+            ghost.dir = oppositeDir(ghost.dir) ?? ghost.dir; // reverse on switch
           }
         }
       }
@@ -1158,9 +1174,10 @@ export default function PacmanGame() {
             if (isWalkableForPacman(g.maze, nc, nr)) {
               g.pacCol = nc;
               g.pacRow = nr;
-            } else {
-              g.pacDir = null; // hit wall, stop
             }
+            // Don't null out pacDir -- keep trying so Pac-Man resumes
+            // as soon as the corner clears. pacNextDir is also kept alive
+            // so the queued turn fires on the next valid tile.
           }
 
           // If pacDir was null (waiting for first key press)
@@ -1194,29 +1211,37 @@ export default function PacmanGame() {
         }
       }
 
-      // Eat dots
-      const pc = g.pacCol;
-      const pr = g.pacRow;
-      const tile = g.maze[pr]?.[pc];
+      // Eat dots — only eat when Pac-Man is snapped to a tile center
+      const pacCenterX = g.pacCol * TILE + TILE / 2;
+      const pacCenterY = g.pacRow * TILE + TILE / 2;
+      const snapDist =
+        Math.abs(g.pacX - pacCenterX) + Math.abs(g.pacY - pacCenterY);
+      const atCenter = snapDist < 2;
 
-      if (tile === 0) {
-        g.maze[pr][pc] = 2;
-        g.dots--;
-        g.score += 10;
-        setScore(g.score);
-      } else if (tile === 3) {
-        g.maze[pr][pc] = 2;
-        g.dots--;
-        g.score += 50;
-        setScore(g.score);
-        g.frightenedActive = true;
-        g.frightenedTimer = FRIGHTENED_DURATION;
-        g.frightenedEatCount = 0;
-        for (const ghost of g.ghosts) {
-          if (ghost.mode !== "eaten" && ghost.mode !== "leaving") {
-            ghost.mode = "frightened";
-            ghost.frightenedTimer = FRIGHTENED_DURATION;
-            ghost.dir = oppositeDir(ghost.dir);
+      if (atCenter) {
+        const pc = g.pacCol;
+        const pr = g.pacRow;
+        const tile = g.maze[pr]?.[pc];
+
+        if (tile === 0) {
+          g.maze[pr][pc] = 2;
+          g.dots--;
+          g.score += 10;
+          setScore(g.score);
+        } else if (tile === 3) {
+          g.maze[pr][pc] = 2;
+          g.dots--;
+          g.score += 50;
+          setScore(g.score);
+          g.frightenedActive = true;
+          g.frightenedTimer = FRIGHTENED_DURATION;
+          g.frightenedEatCount = 0;
+          for (const ghost of g.ghosts) {
+            if (ghost.mode !== "eaten" && ghost.mode !== "leaving") {
+              ghost.mode = "frightened";
+              ghost.frightenedTimer = FRIGHTENED_DURATION;
+              ghost.dir = oppositeDir(ghost.dir);
+            }
           }
         }
       }
